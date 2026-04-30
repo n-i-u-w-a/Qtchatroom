@@ -1,0 +1,24 @@
+# Build directories
+build/
+build-server/
+build-client/
+
+# Database
+chat.db
+
+# Qt autogen
+*_autogen/
+
+# Object files
+*.o
+*.obj
+
+# IDE
+.vscode/
+*.pro.user
+*.user
+.DS_Store
+
+# Temp
+_test.bat
+_out.txt
