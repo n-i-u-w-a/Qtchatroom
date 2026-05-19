@@ -1,179 +1,146 @@
 # Qt 多人聊天室
 
-基于 **Qt 6 + CMake** 的图形化多人聊天系统，支持用户注册/登录、广播/私聊、密保找回密码、账号注销。
+基于 **Qt 6 + CMake** 的 QQ 风格图形化多人聊天系统。
+
+## 功能
+
+| 模块 | 功能 |
+|------|------|
+| **用户系统** | 注册/登录、SHA-256+盐密码加密、自定义密保问题、找回密码、注销账号 |
+| **消息** | 广播（公共频道）、私聊（一对一）、群聊（创建/加入/退出群组） |
+| **好友系统** | 搜索用户、发送/接受/忽略/拒绝好友请求、好友分组管理、重命名/删除分组 |
+| **QQ 风格 UI** | 可折叠侧栏、气泡消息、蓝色暗色主题、浅色主题一键切换、左右拖拽伸缩 |
+| **辅助功能** | 系统托盘通知、emoji 表情面板、@提醒高亮、打字状态提示、聊天记录导出 txt/html |
 
 ## 项目结构
 
 ```
 vscodeqt/
-├── server/                         # 服务端（控制台程序）
-│   ├── CMakeLists.txt              # 依赖 Qt6::Core + Network + Concurrent + Sql
-│   ├── main.cpp                    # 入口，自动探测可用端口
-│   ├── chatserver.h / .cpp         # QTcpServer 子类：连接管理、用户注册/登录、消息路由
-│   └── clienthandler.h / .cpp      # 每客户端 I/O：异步收发、线程池消息解析
+├── server/                         # 服务端（控制台）
+│   ├── CMakeLists.txt              # Qt6::Core + Network + Concurrent + Sql
+│   ├── main.cpp                    # 入口，自动探测可用端口 (9527-9536)
+│   ├── chatserver.h / .cpp         # QTcpServer：连接管理、注册/登录、消息路由
+│   └── clienthandler.h / .cpp      # 每客户端：异步 I/O + QThreadPool 消息解析
 │
-├── client/                         # 客户端（GUI 程序）
-│   ├── CMakeLists.txt              # 依赖 Qt6::Core + Widgets + Network
-│   ├── main.cpp                    # 入口，启动登录窗口
-│   ├── chatclient.h / .cpp         # QTcpSocket 封装：协议序列化、信号转发
-│   ├── chatwindow.h / .cpp         # 主窗口：登录/注册/找回密码卡片 + 聊天面板
-│   └── privatechatdialog.h / .cpp  # 私聊弹窗：QQ 气泡风格，历史持久化
+├── client/                         # 客户端（GUI）
+│   ├── CMakeLists.txt              # Qt6::Core + Widgets + Network
+│   ├── main.cpp                    # 入口
+│   ├── chatclient.h / .cpp         # QTcpSocket 封装：协议序列化
+│   ├── chatwindow.h / .cpp         # 主窗口：登录卡片 + QQ 风格聊天面板
+│   └── privatechatdialog.h / .cpp  # 私聊弹窗：气泡样式
 │
-├── run_server.bat                  # 一键启动服务端
-├── run_client.bat                  # 一键启动客户端
-├── CMakeLists.txt                  # 旧单文件项目（已废弃，保留用作参考）
-├── main.cpp                        # 旧单文件入口（已废弃）
-└── README.md
+├── run_server.bat / run_client.bat # 一键启动脚本
+├── README.md / DEPLOY.md           # 文档
+└── .gitignore
 ```
 
 ## 快速开始
 
-### 环境要求
+### 环境
 
-- Windows 10/11
-- Qt 6.10（MinGW 64-bit）
-- CMake 3.16+
-- Ninja（Qt 自带）
+- Windows 10/11 + Qt 6.10 (MinGW 64-bit) + CMake 3.16+
 
 ### 构建
 
 ```bash
 # 服务端
-cmake -G Ninja -S server -B build-server \
-  -DCMAKE_PREFIX_PATH=D:/Qt/6.10.2/mingw_64 \
-  -DCMAKE_CXX_COMPILER=D:/Qt/Tools/mingw1310_64/bin/g++.exe \
-  -DCMAKE_MAKE_PROGRAM=D:/Qt/Tools/Ninja/ninja.exe
+cmake -G Ninja -S server -B build-server -DCMAKE_PREFIX_PATH=D:/Qt/6.10.2/mingw_64
 cmake --build build-server
 
 # 客户端
-cmake -G Ninja -S client -B build-client \
-  -DCMAKE_PREFIX_PATH=D:/Qt/6.10.2/mingw_64 \
-  -DCMAKE_CXX_COMPILER=D:/Qt/Tools/mingw1310_64/bin/g++.exe \
-  -DCMAKE_MAKE_PROGRAM=D:/Qt/Tools/Ninja/ninja.exe
+cmake -G Ninja -S client -B build-client -DCMAKE_PREFIX_PATH=D:/Qt/6.10.2/mingw_64
 cmake --build build-client
 
-# 部署 Qt DLL（首次构建后执行一次）
+# 部署 Qt DLL
 windeployqt --no-translations build-server/chatserver.exe
 windeployqt --no-translations build-client/chatclient.exe
 ```
 
 ### 运行
 
-1. 双击 `run_server.bat` 启动服务端（自动探测 9527-9536 端口）
-2. 双击 `run_client.bat` 启动客户端（可多开模拟多用户）
-
-## 功能列表
-
-| 功能 | 说明 |
-|------|------|
-| **用户注册** | 用户名 + 密码 + 密保问题，SHA-256 加盐存储 |
-| **用户登录** | 密码校验，同名互斥（同一账号不能重复登录） |
-| **找回密码** | 输入用户名 → 显示密保问题 → 回答正确后重设密码 |
-| **注销账号** | 删除数据库记录、踢下线、广播通知 |
-| **广播消息** | 发给所有在线用户 |
-| **私聊消息** | 选中在线用户发送，仅对方可见 |
-| **私聊弹窗** | 双击用户列表弹出独立对话框，QQ 气泡风格 |
-| **聊天记录** | 私聊历史内存持久化，关闭对话框后不丢失 |
-| **在线列表** | 实时显示在线用户，用户上下线自动更新 |
+1. 双击 `run_server.bat` 启动服务端
+2. 双击 `run_client.bat` 启动客户端（可多开）
 
 ## 通信协议
 
-所有消息以 JSON 文本 + 换行符分隔，通过 TCP 发送。
+JSON 文本 + 换行符分隔，TCP 传输。
 
-### 登录 / 注册
+### 认证
 
 ```json
-// → 登录
+// 注册
+{"type":"register","username":"alice","password":"123456","question":"你的宠物叫什么","answer":"cat"}
+// 登录
 {"type":"login","username":"alice","password":"123456"}
-
-// → 注册
-{"type":"register","username":"alice","password":"123456","question":"你母亲的名字是什么？","answer":"mary"}
-
-// ← 成功
-{"type":"login_ok","username":"alice"}
-
-// ← 失败
-{"type":"login_error","content":"Invalid username or password"}
-```
-
-### 找回密码
-
-```json
-// → 查询密保问题
+// 找回密码
 {"type":"forgot_password","username":"alice"}
-
-// ← 返回问题
-{"type":"security_question","username":"alice","question":"你母亲的名字是什么？"}
-
-// ← 用户不存在
-{"type":"forgot_error","content":"User not found or no security question set"}
-
-// → 重置密码
-{"type":"reset_password","username":"alice","answer":"mary","new_password":"7890"}
-
-// ← 成功
-{"type":"password_reset_ok","content":"Password reset successfully. You can now login."}
-
-// ← 失败
-{"type":"reset_error","content":"Wrong answer"}
+{"type":"reset_password","username":"alice","answer":"cat","new_password":"7890"}
 ```
 
 ### 消息
 
 ```json
-// → 广播
+// 广播
 {"type":"broadcast","content":"hello everyone"}
+// 私聊
+{"type":"private","to":"bob","content":"hi"}
+// 群消息
+{"type":"group_msg","group_id":1,"content":"hello group"}
+// 打字状态
+{"type":"typing","to":"bob"}
+```
 
-// → 私聊
-{"type":"private","to":"bob","content":"hi bob"}
+### 好友
 
-// → 群发
-{"type":"group","to":["bob","eve"],"content":"hello"}
+```json
+{"type":"search_users","query":"al"}
+{"type":"friend_request","to":"bob"}
+{"type":"friend_response","from":"alice","action":"accept"}  // accept/ignore/reject
+{"type":"set_friend_group","friend":"bob","group_name":"Work"}
+{"type":"create_friend_group","group_name":"Family"}
+{"type":"rename_friend_group","old":"Work","new":"Office"}
+{"type":"delete_friend_group","group":"OldGroup"}
+```
 
-// → 注销
-{"type":"delete_account"}
+### 群组
 
-// ← 收到消息（scope: broadcast / private / group）
-{"type":"message","sender":"alice","content":"hello","timestamp":"14:30:05","scope":"broadcast"}
+```json
+{"type":"create_group","name":"Team Alpha"}
+{"type":"join_group","group_id":1}
+{"type":"leave_group","group_id":1}
+```
 
-// ← 系统通知
+### 服务端响应
+
+```json
+{"type":"login_ok","username":"alice"}
+{"type":"login_error","content":"Invalid password"}
+{"type":"message","sender":"bob","content":"hi","timestamp":"14:30:05","scope":"private","to":"alice"}
 {"type":"system","content":"alice joined the chat"}
-
-// ← 在线用户列表
-{"type":"userlist","users":["alice","bob","eve"]}
+{"type":"userlist","users":["alice","bob"]}
+{"type":"friend_list","friends":[{"name":"bob","group":"Work"}]}
+{"type":"friend_request","from":"eve"}
+{"type":"group_list","groups":[{"id":1,"name":"Team","owner":"alice","members":3}]}
 ```
 
 ## 数据库
 
-服务端使用 **SQLite**，数据库文件 `chat.db` 自动创建在服务端运行目录。
+SQLite (`chat.db`)，表结构：
 
-### users 表
+| 表 | 说明 |
+|----|------|
+| `users` | 用户：username, password(salt:hash), question, answer |
+| `chat_groups` | 群组：id, name, owner |
+| `group_members` | 群成员：group_id, username |
+| `friends` | 好友：username, friend, group_name |
+| `friend_groups` | 空分组持久化：username, group_name |
+| `friend_requests` | 好友申请：from_user, to_user, status |
 
-| 列 | 类型 | 说明 |
-|----|------|------|
-| id | INTEGER | 自增主键 |
-| username | TEXT UNIQUE | 用户名，不可重复 |
-| password | TEXT | `salt:sha256_hash` 格式存储 |
-| question | TEXT | 密保问题文本 |
-| answer | TEXT | 密保答案，`salt:sha256_hash` 格式存储 |
-| created | TEXT | 创建时间 |
+## 架构
 
-可用 [DB Browser for SQLite](https://sqlitebrowser.org/dl/) 打开 `chat.db` 直接管理用户。
-
-## 架构设计
-
-### 服务端并发模型
-
-- **主线程**：事件循环驱动，所有 QTcpSocket I/O 异步非阻塞
-- **QThreadPool**：消息解析（JSON parse + 格式化）通过 `QtConcurrent::run` 投递到线程池
-- **QReadWriteLock**：保护客户端列表和用户名映射，读多写少场景
-
-### 安全设计
-
-- 密码和密保答案均使用 **SHA-256 + 随机盐**（16 字节）哈希存储，不与明文比较
-- 密保答案比较时统一转小写、去空格
-- 注册/登录时用户名长度限制 1-20 字符，禁止空格
-- 密码最少 4 个字符
+- **服务端**：QTcpServer 异步事件驱动 + QThreadPool 并行消息解析 + QReadWriteLock 保护状态
+- **客户端**：QTcpSocket 异步收发 + QTreeWidget 可折叠侧栏 + QSplitter 可拖拽布局
+- **安全**：SHA-256 + 16 字节随机盐，密保答案统一小写比较
 
 ## 许可证
 
