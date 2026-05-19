@@ -25,7 +25,7 @@ PrivateChatDialog::PrivateChatDialog(const QString &peer, ChatClient *client,
     setMinimumSize(380, 380);
     resize(440, 480);
 
-    setStyleSheet("PrivateChatDialog { background: #1a1a2e; }");
+    setStyleSheet("PrivateChatDialog { background: #0a1628; }");
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -35,9 +35,9 @@ PrivateChatDialog::PrivateChatDialog(const QString &peer, ChatClient *client,
     m_scroll = new QScrollArea(this);
     m_scroll->setWidgetResizable(true);
     m_scroll->setStyleSheet(
-        "QScrollArea { background: #1a1a2e; border: none; }"
+        "QScrollArea { background: #0a1628; border: none; }"
         "QScrollBar:vertical {"
-        "  background: #1a1a2e; width: 6px;"
+        "  background: #0a1628; width: 6px;"
         "}"
         "QScrollBar::handle:vertical {"
         "  background: #30363d; border-radius: 3px; min-height: 30px;"
@@ -45,7 +45,7 @@ PrivateChatDialog::PrivateChatDialog(const QString &peer, ChatClient *client,
         "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }");
 
     m_bubbleContainer = new QWidget;
-    m_bubbleContainer->setStyleSheet("background: #1a1a2e;");
+    m_bubbleContainer->setStyleSheet("background: #0a1628;");
     auto *bubbleLayout = new QVBoxLayout(m_bubbleContainer);
     bubbleLayout->setContentsMargins(10, 10, 10, 10);
     bubbleLayout->setSpacing(8);
@@ -67,11 +67,11 @@ PrivateChatDialog::PrivateChatDialog(const QString &peer, ChatClient *client,
     m_input->setPlaceholderText(QString("Message @%1...").arg(peer));
     m_input->setStyleSheet(
         "QLineEdit {"
-        "  background: #161b22; color: #c9d1d9;"
+        "  background: #07101a; color: #c9d1d9;"
         "  border: 1px solid #30363d; border-radius: 8px;"
         "  padding: 9px 14px; font-size: 14px;"
         "}"
-        "QLineEdit:focus { border-color: #667eea; background: #1c2333; }");
+        "QLineEdit:focus { border-color: #2196f3; background: #1c2333; }");
     connect(m_input, &QLineEdit::returnPressed, this, &PrivateChatDialog::onSendClicked);
     inputBar->addWidget(m_input);
 
@@ -79,12 +79,12 @@ PrivateChatDialog::PrivateChatDialog(const QString &peer, ChatClient *client,
     m_sendBtn->setCursor(Qt::PointingHandCursor);
     m_sendBtn->setStyleSheet(
         "QPushButton {"
-        "  background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #667eea,stop:1 #764ba2);"
+        "  background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #2196f3,stop:1 #1565c0);"
         "  color: white; border: none; border-radius: 8px;"
         "  padding: 9px 18px; font-size: 13px; font-weight: bold;"
         "}"
         "QPushButton:hover {"
-        "  background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #7b93f5,stop:1 #8b5fbf);"
+        "  background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #42a5f5,stop:1 #1976d2);"
         "}");
     connect(m_sendBtn, &QPushButton::clicked, this, &PrivateChatDialog::onSendClicked);
     inputBar->addWidget(m_sendBtn);
@@ -134,7 +134,7 @@ QWidget *PrivateChatDialog::buildBubble(const ChatMessage &msg)
     auto *avatar = new QLabel(avatarLetter(msg.sender));
     avatar->setFixedSize(34, 34);
     avatar->setAlignment(Qt::AlignCenter);
-    QString avatarBg = fromMe ? "#667eea" : "#30363d";
+    QString avatarBg = fromMe ? "#2196f3" : "#30363d";
     avatar->setStyleSheet(
         QString("background: %1; color: white; border-radius: 17px;"
                 "font-size: 14px; font-weight: bold;").arg(avatarBg));

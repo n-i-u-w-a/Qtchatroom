@@ -112,9 +112,79 @@ void ClientHandler::processMessage(const QByteArray &line)
             return result;
         }
 
+        if (type == "typing") {
+            result["_action"] = "typing";
+            result["to"] = obj["to"].toString();
+            result["from"] = loggedIn ? senderName : QString();
+            return result;
+        }
         if (type == "delete_account") {
             result["_action"] = QStringLiteral("delete_account");
             return result;
+        }
+
+        // Group chat
+        if (type == "create_group") {
+            result["_action"] = "create_group"; result["name"] = obj["name"].toString(); return result;
+        }
+        if (type == "join_group") {
+            result["_action"] = "join_group"; result["group_id"] = obj["group_id"].toInt(); return result;
+        }
+        if (type == "leave_group") {
+            result["_action"] = "leave_group"; result["group_id"] = obj["group_id"].toInt(); return result;
+        }
+        if (type == "group_msg") {
+            result["_action"] = "group_msg"; result["group_id"] = obj["group_id"].toInt();
+            result["content"] = obj["content"].toString();
+            result["timestamp"] = QDateTime::currentDateTime().toString("hh:mm:ss");
+            return result;
+        }
+        if (type == "list_groups") {
+            result["_action"] = "list_groups"; return result;
+        }
+        if (type == "group_members") {
+            result["_action"] = "group_members"; result["group_id"] = obj["group_id"].toInt(); return result;
+        }
+
+        // Friend system
+        if (type == "search_users") {
+            result["_action"] = "search_users"; result["query"] = obj["query"].toString(); return result;
+        }
+        if (type == "friend_request") {
+            result["_action"] = "friend_request"; result["to"] = obj["to"].toString(); return result;
+        }
+        if (type == "friend_response") {
+            result["_action"] = "friend_response"; result["from"] = obj["from"].toString();
+            result["action"] = obj["action"].toString("accept"); return result;
+        }
+        if (type == "friend_list") {
+            result["_action"] = "friend_list"; return result;
+        }
+        if (type == "set_friend_group") {
+            result["_action"] = "set_friend_group";
+            result["friend"] = obj["friend"].toString();
+            result["group_name"] = obj["group_name"].toString();
+            return result;
+        }
+        if (type == "create_friend_group") {
+            result["_action"] = "create_friend_group"; result["group_name"] = obj["group_name"].toString(); return result;
+        }
+        if (type == "list_friend_groups") {
+            result["_action"] = "list_friend_groups"; return result;
+        }
+        if (type == "rename_friend_group") {
+            result["_action"] = "rename_friend_group";
+            result["old"] = obj["old"].toString();
+            result["new"] = obj["new"].toString();
+            return result;
+        }
+        if (type == "delete_friend_group") {
+            result["_action"] = "delete_friend_group";
+            result["group"] = obj["group"].toString();
+            return result;
+        }
+        if (type == "list_pending_requests") {
+            result["_action"] = "list_pending_requests"; return result;
         }
 
         QString content = obj["content"].toString().trimmed();
@@ -170,8 +240,49 @@ void ClientHandler::processMessage(const QByteArray &line)
             emit resetPasswordRequested(this, result["username"].toString(),
                                         result["answer"].toString(),
                                         result["new_password"].toString());
+        } else if (action == "typing") {
+            QJsonObject t; t["type"] = "typing"; t["from"] = result["from"].toString();
+            emit typingRelayRequested(result["to"].toString(),
+                                       QJsonDocument(t).toJson(QJsonDocument::Compact));
         } else if (action == "delete_account") {
             emit deleteAccountRequested(this);
+        } else if (action == "create_group") {
+            emit createGroupRequested(this, result["name"].toString());
+        } else if (action == "join_group") {
+            emit joinGroupRequested(this, result["group_id"].toInt());
+        } else if (action == "leave_group") {
+            emit leaveGroupRequested(this, result["group_id"].toInt());
+        } else if (action == "group_msg") {
+            emit groupMessageRequested(this, result["group_id"].toInt(),
+                                       result["content"].toString(),
+                                       result["timestamp"].toString());
+        } else if (action == "list_groups") {
+            emit listGroupsRequested(this);
+        } else if (action == "group_members") {
+            emit listGroupMembersRequested(this, result["group_id"].toInt());
+        } else if (action == "search_users") {
+            emit searchUsersRequested(this, result["query"].toString());
+        } else if (action == "friend_request") {
+            emit friendRequestRequested(this, result["to"].toString());
+        } else if (action == "friend_response") {
+            emit friendResponseRequested(this, result["from"].toString(),
+                                         result["action"].toString());
+        } else if (action == "friend_list") {
+            emit friendListRequested(this);
+        } else if (action == "set_friend_group") {
+            emit setFriendGroupRequested(this, result["friend"].toString(),
+                                         result["group_name"].toString());
+        } else if (action == "create_friend_group") {
+            emit createFriendGroupRequested(this, result["group_name"].toString());
+        } else if (action == "rename_friend_group") {
+            emit renameFriendGroupRequested(this, result["old"].toString(),
+                                            result["new"].toString());
+        } else if (action == "delete_friend_group") {
+            emit deleteFriendGroupRequested(this, result["group"].toString());
+        } else if (action == "list_friend_groups") {
+            emit listFriendGroupsRequested(this);
+        } else if (action == "list_pending_requests") {
+            emit listPendingRequestsRequested(this);
         } else if (action == "broadcast") {
             result.remove("_action");
             result["type"] = "message";

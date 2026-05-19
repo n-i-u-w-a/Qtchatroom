@@ -41,6 +41,47 @@ void ChatServer::initDatabase()
         "  created  TEXT    DEFAULT (datetime('now'))"
         ")");
 
+    // Group chat tables
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS chat_groups ("
+        "  id      INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "  name    TEXT    NOT NULL,"
+        "  owner   TEXT    NOT NULL,"
+        "  created TEXT    DEFAULT (datetime('now'))"
+        ")");
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS group_members ("
+        "  group_id INTEGER,"
+        "  username TEXT,"
+        "  joined   TEXT DEFAULT (datetime('now')),"
+        "  PRIMARY KEY (group_id, username)"
+        ")");
+
+    // Friend system tables
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS friends ("
+        "  username   TEXT,"
+        "  friend     TEXT,"
+        "  group_name TEXT DEFAULT '',"
+        "  created    TEXT DEFAULT (datetime('now')),"
+        "  PRIMARY KEY (username, friend)"
+        ")");
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS friend_groups ("
+        "  username   TEXT,"
+        "  group_name TEXT,"
+        "  created    TEXT DEFAULT (datetime('now')),"
+        "  PRIMARY KEY (username, group_name)"
+        ")");
+    query.exec(
+        "CREATE TABLE IF NOT EXISTS friend_requests ("
+        "  from_user TEXT,"
+        "  to_user   TEXT,"
+        "  status    TEXT DEFAULT 'pending',"
+        "  created   TEXT DEFAULT (datetime('now')),"
+        "  PRIMARY KEY (from_user, to_user)"
+        ")");
+
     upgradeDatabase();
 
     emit logMessage("Database initialized (chat.db)");
@@ -48,13 +89,17 @@ void ChatServer::initDatabase()
 
 void ChatServer::upgradeDatabase()
 {
-    // Add question/answer columns if upgrading from older schema
     QSqlQuery q(m_db);
     q.exec("SELECT question FROM users LIMIT 1");
     if (q.lastError().isValid()) {
         q.exec("ALTER TABLE users ADD COLUMN question TEXT DEFAULT ''");
         q.exec("ALTER TABLE users ADD COLUMN answer TEXT DEFAULT ''");
         emit logMessage("Database upgraded with security question columns");
+    }
+    q.exec("SELECT group_name FROM friends LIMIT 1");
+    if (q.lastError().isValid()) {
+        q.exec("ALTER TABLE friends ADD COLUMN group_name TEXT DEFAULT ''");
+        emit logMessage("Database upgraded with friend group column");
     }
 }
 
@@ -135,8 +180,32 @@ void ChatServer::incomingConnection(qintptr socketDescriptor)
     connect(handler, &ClientHandler::deleteAccountRequested,
             this, &ChatServer::deleteUser);
 
+    // Group chat
+    connect(handler, &ClientHandler::createGroupRequested, this, &ChatServer::createGroup);
+    connect(handler, &ClientHandler::joinGroupRequested, this, &ChatServer::joinGroup);
+    connect(handler, &ClientHandler::leaveGroupRequested, this, &ChatServer::leaveGroup);
+    connect(handler, &ClientHandler::groupMessageRequested, this, &ChatServer::sendGroupMessage);
+    connect(handler, &ClientHandler::listGroupsRequested, this, &ChatServer::listGroups);
+    connect(handler, &ClientHandler::listGroupMembersRequested, this, &ChatServer::listGroupMembers);
+
+    // Friend system
+    connect(handler, &ClientHandler::searchUsersRequested, this, &ChatServer::searchUsers);
+    connect(handler, &ClientHandler::friendRequestRequested, this, &ChatServer::sendFriendRequest);
+    connect(handler, &ClientHandler::friendResponseRequested, this, &ChatServer::respondFriendRequest);
+    connect(handler, &ClientHandler::friendListRequested, this, &ChatServer::listFriends);
+    connect(handler, &ClientHandler::setFriendGroupRequested, this, &ChatServer::setFriendGroup);
+    connect(handler, &ClientHandler::createFriendGroupRequested, this, &ChatServer::createFriendGroup);
+    connect(handler, &ClientHandler::renameFriendGroupRequested, this, &ChatServer::renameFriendGroup);
+    connect(handler, &ClientHandler::deleteFriendGroupRequested, this, &ChatServer::deleteFriendGroup);
+    connect(handler, &ClientHandler::listFriendGroupsRequested, this, &ChatServer::listFriendGroups);
+    connect(handler, &ClientHandler::listPendingRequestsRequested, this, &ChatServer::listPendingRequests);
+
     connect(handler, &ClientHandler::disconnected, this, &ChatServer::removeHandler);
 
+    connect(handler, &ClientHandler::typingRelayRequested, this,
+            [this](const QString &to, const QByteArray &data) {
+                sendToUser(to, data);
+            });
     connect(handler, &ClientHandler::messageForRoute, this,
             [this, handler](const QByteArray &msg, const QString &target,
                             const QStringList &targets) {
@@ -350,6 +419,274 @@ void ChatServer::deleteUser(ClientHandler *handler)
     sysMsg["content"] = QString("%1 has deleted their account and left").arg(name);
     broadcast(QJsonDocument(sysMsg).toJson(QJsonDocument::Compact));
     sendUserList();
+}
+
+// ========== Group Chat ==========
+
+void ChatServer::createGroup(ClientHandler *handler, const QString &name)
+{
+    if (name.isEmpty() || name.length() > 30) {
+        QJsonObject r; r["type"] = "group_error"; r["content"] = "Invalid group name";
+        handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+        return;
+    }
+    QSqlQuery q(m_db);
+    q.prepare("INSERT INTO chat_groups (name, owner) VALUES (?, ?)");
+    q.addBindValue(name); q.addBindValue(handler->username());
+    if (!q.exec()) { QJsonObject r; r["type"] = "group_error"; r["content"] = "Group name exists"; handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact)); return; }
+    int gid = q.lastInsertId().toInt();
+    q.prepare("INSERT INTO group_members (group_id, username) VALUES (?, ?)");
+    q.addBindValue(gid); q.addBindValue(handler->username()); q.exec();
+
+    QJsonObject r; r["type"] = "group_created"; r["group_id"] = gid; r["name"] = name;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+    emit logMessage(QString("Group '%1' created by %2").arg(name, handler->username()));
+}
+
+void ChatServer::joinGroup(ClientHandler *handler, int groupId)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT name FROM chat_groups WHERE id = ?");
+    q.addBindValue(groupId);
+    if (!q.exec() || !q.next()) { QJsonObject r; r["type"] = "group_error"; r["content"] = "Group not found"; handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact)); return; }
+    QString name = q.value(0).toString();
+    q.prepare("INSERT OR IGNORE INTO group_members (group_id, username) VALUES (?, ?)");
+    q.addBindValue(groupId); q.addBindValue(handler->username()); q.exec();
+
+    QJsonObject r; r["type"] = "group_joined"; r["group_id"] = groupId; r["name"] = name;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::leaveGroup(ClientHandler *handler, int groupId)
+{
+    QSqlQuery q(m_db);
+    q.prepare("DELETE FROM group_members WHERE group_id = ? AND username = ?");
+    q.addBindValue(groupId); q.addBindValue(handler->username()); q.exec();
+    QJsonObject r; r["type"] = "group_left"; r["group_id"] = groupId;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::sendGroupMessage(ClientHandler *sender, int groupId,
+                                   const QString &content, const QString &timestamp)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT name FROM chat_groups WHERE id = ?");
+    q.addBindValue(groupId);
+    QString gname = "Group";
+    if (q.exec() && q.next()) gname = q.value(0).toString();
+
+    q.prepare("SELECT username FROM group_members WHERE group_id = ?");
+    q.addBindValue(groupId);
+    QStringList members;
+    while (q.next()) members << q.value(0).toString();
+
+    QJsonObject msg;
+    msg["type"] = "message"; msg["sender"] = sender->username();
+    msg["content"] = content; msg["timestamp"] = timestamp;
+    msg["scope"] = "group"; msg["group_id"] = groupId; msg["group_name"] = gname;
+    QByteArray data = QJsonDocument(msg).toJson(QJsonDocument::Compact);
+
+    for (const auto &m : members)
+        sendToUser(m, data);
+}
+
+void ChatServer::listGroups(ClientHandler *handler)
+{
+    QSqlQuery q(m_db);
+    q.exec("SELECT g.id, g.name, g.owner, (SELECT COUNT(*) FROM group_members WHERE group_id=g.id) "
+           "FROM chat_groups g JOIN group_members gm ON g.id=gm.group_id "
+           "WHERE gm.username=? GROUP BY g.id");
+    q.addBindValue(handler->username());
+    q.exec();
+    // Re-query since we need to bind first
+    q.finish();
+    q.prepare("SELECT g.id, g.name, g.owner, "
+              "(SELECT COUNT(*) FROM group_members WHERE group_id=g.id) "
+              "FROM chat_groups g JOIN group_members gm ON g.id=gm.group_id "
+              "WHERE gm.username=? GROUP BY g.id");
+    q.addBindValue(handler->username());
+    q.exec();
+    QJsonArray arr;
+    while (q.next()) {
+        QJsonObject g;
+        g["id"] = q.value(0).toInt(); g["name"] = q.value(1).toString();
+        g["owner"] = q.value(2).toString(); g["members"] = q.value(3).toInt();
+        arr.append(g);
+    }
+    QJsonObject r; r["type"] = "group_list"; r["groups"] = arr;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::listGroupMembers(ClientHandler *handler, int groupId)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT username FROM group_members WHERE group_id = ?");
+    q.addBindValue(groupId); q.exec();
+    QJsonArray arr;
+    while (q.next()) arr.append(q.value(0).toString());
+    QJsonObject r; r["type"] = "group_members_list"; r["group_id"] = groupId; r["members"] = arr;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+// ========== Friend System ==========
+
+void ChatServer::searchUsers(ClientHandler *handler, const QString &query)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT username FROM users WHERE username LIKE ? AND username != ? LIMIT 20");
+    q.addBindValue("%" + query + "%"); q.addBindValue(handler->username()); q.exec();
+    QJsonArray arr;
+    while (q.next()) arr.append(q.value(0).toString());
+    QJsonObject r; r["type"] = "search_results"; r["query"] = query; r["users"] = arr;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::sendFriendRequest(ClientHandler *from, const QString &to)
+{
+    if (from->username() == to) {
+        QJsonObject r; r["type"] = "friend_error"; r["content"] = "Cannot add yourself";
+        from->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact)); return;
+    }
+    QSqlQuery q(m_db);
+    q.prepare("SELECT COUNT(*) FROM users WHERE username = ?"); q.addBindValue(to); q.exec();
+    if (!q.next() || q.value(0).toInt() == 0) {
+        QJsonObject r; r["type"] = "friend_error"; r["content"] = "User not found";
+        from->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact)); return;
+    }
+    q.prepare("INSERT OR IGNORE INTO friend_requests (from_user, to_user) VALUES (?, ?)");
+    q.addBindValue(from->username()); q.addBindValue(to); q.exec();
+
+    QJsonObject r; r["type"] = "friend_request_sent"; r["to"] = to;
+    from->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+
+    // Notify target if online
+    QJsonObject notif; notif["type"] = "friend_request"; notif["from"] = from->username();
+    sendToUser(to, QJsonDocument(notif).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::respondFriendRequest(ClientHandler *handler, const QString &from, const QString &action)
+{
+    QSqlQuery q(m_db);
+    if (action == "accept") {
+        q.prepare("INSERT OR IGNORE INTO friends (username, friend) VALUES (?, ?)");
+        q.addBindValue(handler->username()); q.addBindValue(from); q.exec();
+        q.prepare("INSERT OR IGNORE INTO friends (username, friend) VALUES (?, ?)");
+        q.addBindValue(from); q.addBindValue(handler->username()); q.exec();
+    }
+    if (action == "ignore") {
+        q.prepare("UPDATE friend_requests SET status='ignored' WHERE from_user=? AND to_user=?");
+        q.addBindValue(from); q.addBindValue(handler->username()); q.exec();
+        QJsonObject r; r["type"] = "friend_ignored"; r["from"] = from;
+        handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+        return;
+    }
+    // accept or reject: delete the request
+    q.prepare("DELETE FROM friend_requests WHERE from_user = ? AND to_user = ?");
+    q.addBindValue(from); q.addBindValue(handler->username()); q.exec();
+
+    QJsonObject r; r["type"] = action == "accept" ? "friend_added" : "friend_rejected";
+    r["friend"] = from;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+
+    if (action == "accept") {
+        QJsonObject notif; notif["type"] = "friend_added"; notif["friend"] = handler->username();
+        sendToUser(from, QJsonDocument(notif).toJson(QJsonDocument::Compact));
+    }
+}
+
+void ChatServer::listFriends(ClientHandler *handler)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT friend, group_name FROM friends WHERE username = ?");
+    q.addBindValue(handler->username()); q.exec();
+    QJsonArray arr;
+    while (q.next()) {
+        QJsonObject f;
+        f["name"] = q.value(0).toString();
+        f["group"] = q.value(1).toString();
+        arr.append(f);
+    }
+    QJsonObject r; r["type"] = "friend_list"; r["friends"] = arr;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::setFriendGroup(ClientHandler *handler, const QString &friendName,
+                                 const QString &groupName)
+{
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE friends SET group_name = ? WHERE username = ? AND friend = ?");
+    q.addBindValue(groupName); q.addBindValue(handler->username()); q.addBindValue(friendName); q.exec();
+    QJsonObject r; r["type"] = "friend_group_set"; r["friend"] = friendName; r["group"] = groupName;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::createFriendGroup(ClientHandler *handler, const QString &groupName)
+{
+    QSqlQuery q(m_db);
+    q.prepare("INSERT OR IGNORE INTO friend_groups (username, group_name) VALUES (?, ?)");
+    q.addBindValue(handler->username()); q.addBindValue(groupName); q.exec();
+    QJsonObject r; r["type"] = "friend_group_created"; r["group"] = groupName;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::renameFriendGroup(ClientHandler *handler, const QString &oldName, const QString &newName)
+{
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE friends SET group_name = ? WHERE username = ? AND group_name = ?");
+    q.addBindValue(newName); q.addBindValue(handler->username()); q.addBindValue(oldName); q.exec();
+    q.prepare("UPDATE OR IGNORE friend_groups SET group_name = ? WHERE username = ? AND group_name = ?");
+    q.addBindValue(newName); q.addBindValue(handler->username()); q.addBindValue(oldName); q.exec();
+    QJsonObject r; r["type"] = "friend_group_renamed"; r["old"] = oldName; r["new"] = newName;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::deleteFriendGroup(ClientHandler *handler, const QString &groupName)
+{
+    QSqlQuery q(m_db);
+    q.prepare("UPDATE friends SET group_name = '' WHERE username = ? AND group_name = ?");
+    q.addBindValue(handler->username()); q.addBindValue(groupName); q.exec();
+    q.prepare("DELETE FROM friend_groups WHERE username = ? AND group_name = ?");
+    q.addBindValue(handler->username()); q.addBindValue(groupName); q.exec();
+    QJsonObject r; r["type"] = "friend_group_deleted"; r["group"] = groupName;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::listFriendGroups(ClientHandler *handler)
+{
+    QSqlQuery q(m_db);
+    // Union: groups from friend_groups table (including empty) + groups from friends table
+    q.prepare("SELECT group_name, 0 as cnt FROM friend_groups WHERE username = ? "
+              "UNION "
+              "SELECT group_name, COUNT(*) FROM friends WHERE username = ? AND group_name != '' "
+              "GROUP BY group_name ORDER BY group_name");
+    q.addBindValue(handler->username());
+    q.addBindValue(handler->username());
+    q.exec();
+    QJsonArray arr;
+    QSet<QString> seen;
+    while (q.next()) {
+        QString name = q.value(0).toString();
+        int cnt = q.value(1).toInt();
+        if (name.isEmpty() || seen.contains(name)) continue;
+        seen.insert(name);
+        QJsonObject g;
+        g["name"] = name;
+        g["count"] = cnt;
+        arr.append(g);
+    }
+    QJsonObject r; r["type"] = "friend_groups"; r["groups"] = arr;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
+}
+
+void ChatServer::listPendingRequests(ClientHandler *handler)
+{
+    QSqlQuery q(m_db);
+    q.prepare("SELECT from_user FROM friend_requests WHERE to_user = ? AND status='pending'");
+    q.addBindValue(handler->username()); q.exec();
+    QJsonArray arr;
+    while (q.next()) arr.append(q.value(0).toString());
+    QJsonObject r; r["type"] = "pending_requests"; r["requests"] = arr;
+    handler->sendMessage(QJsonDocument(r).toJson(QJsonDocument::Compact));
 }
 
 void ChatServer::sendUserList(ClientHandler *to)

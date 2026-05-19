@@ -76,6 +76,48 @@ void ChatClient::sendResetPassword(const QString &username, const QString &answe
     m_socket->flush();
 }
 
+void ChatClient::writeJson(const QJsonObject &msg)
+{
+    m_socket->write(QJsonDocument(msg).toJson(QJsonDocument::Compact) + "\n");
+    m_socket->flush();
+}
+
+void ChatClient::sendTyping(const QString &to)
+    { QJsonObject m; m["type"]="typing"; m["to"]=to; writeJson(m); }
+
+void ChatClient::sendCreateGroup(const QString &name)
+    { QJsonObject m; m["type"]="create_group"; m["name"]=name; writeJson(m); }
+void ChatClient::sendJoinGroup(int groupId)
+    { QJsonObject m; m["type"]="join_group"; m["group_id"]=groupId; writeJson(m); }
+void ChatClient::sendLeaveGroup(int groupId)
+    { QJsonObject m; m["type"]="leave_group"; m["group_id"]=groupId; writeJson(m); }
+void ChatClient::sendGroupMessage(int groupId, const QString &content)
+    { QJsonObject m; m["type"]="group_msg"; m["group_id"]=groupId; m["content"]=content; writeJson(m); }
+void ChatClient::sendListGroups()
+    { QJsonObject m; m["type"]="list_groups"; writeJson(m); }
+void ChatClient::sendGroupMembers(int groupId)
+    { QJsonObject m; m["type"]="group_members"; m["group_id"]=groupId; writeJson(m); }
+void ChatClient::sendSearchUsers(const QString &query)
+    { QJsonObject m; m["type"]="search_users"; m["query"]=query; writeJson(m); }
+void ChatClient::sendFriendRequest(const QString &to)
+    { QJsonObject m; m["type"]="friend_request"; m["to"]=to; writeJson(m); }
+void ChatClient::sendFriendResponse(const QString &from, const QString &action)
+    { QJsonObject m; m["type"]="friend_response"; m["from"]=from; m["action"]=action; writeJson(m); }
+void ChatClient::sendFriendList()
+    { QJsonObject m; m["type"]="friend_list"; writeJson(m); }
+void ChatClient::sendSetFriendGroup(const QString &friendName, const QString &groupName)
+    { QJsonObject m; m["type"]="set_friend_group"; m["friend"]=friendName; m["group_name"]=groupName; writeJson(m); }
+void ChatClient::sendCreateFriendGroup(const QString &groupName)
+    { QJsonObject m; m["type"]="create_friend_group"; m["group_name"]=groupName; writeJson(m); }
+void ChatClient::sendRenameFriendGroup(const QString &oldName, const QString &newName)
+    { QJsonObject m; m["type"]="rename_friend_group"; m["old"]=oldName; m["new"]=newName; writeJson(m); }
+void ChatClient::sendDeleteFriendGroup(const QString &groupName)
+    { QJsonObject m; m["type"]="delete_friend_group"; m["group"]=groupName; writeJson(m); }
+void ChatClient::sendListFriendGroups()
+    { QJsonObject m; m["type"]="list_friend_groups"; writeJson(m); }
+void ChatClient::sendListPendingRequests()
+    { QJsonObject m; m["type"]="list_pending_requests"; writeJson(m); }
+
 void ChatClient::sendBroadcast(const QString &content)
 {
     QJsonObject msg;
@@ -170,9 +212,57 @@ void ChatClient::processLine(const QByteArray &line)
             obj["timestamp"].toString(),
             obj["scope"].toString("broadcast"),
             obj["to"].toString());
-    } else if (type == "system") {
+    } else if (type == "group_created")
+        emit groupCreated(obj["group_id"].toInt(), obj["name"].toString());
+    else if (type == "group_joined")
+        emit groupJoined(obj["group_id"].toInt(), obj["name"].toString());
+    else if (type == "group_left")
+        emit groupLeft(obj["group_id"].toInt());
+    else if (type == "group_list")
+        emit groupListReceived(obj["groups"].toArray());
+    else if (type == "group_members_list") {
+        QStringList members;
+        for (const auto &v : obj["members"].toArray()) members << v.toString();
+        emit groupMembersReceived(obj["group_id"].toInt(), members);
+    } else if (type == "group_error")
+        emit groupError(obj["content"].toString());
+    // Friend responses
+    else if (type == "search_results") {
+        QStringList users;
+        for (const auto &v : obj["users"].toArray()) users << v.toString();
+        emit searchResults(obj["query"].toString(), users);
+    } else if (type == "friend_request_sent")
+        emit friendRequestSent(obj["to"].toString());
+    else if (type == "friend_request")
+        emit friendRequestReceived(obj["from"].toString());
+    else if (type == "friend_added")
+        emit friendAdded(obj["friend"].toString());
+    else if (type == "friend_rejected")
+        emit friendRejected(obj["friend"].toString());
+    else if (type == "friend_list")
+        emit friendListReceived(obj["friends"].toArray());
+    else if (type == "friend_group_set")
+        emit friendGroupSet(obj["friend"].toString(), obj["group"].toString());
+    else if (type == "friend_group_created")
+        emit friendGroupCreated(obj["group"].toString());
+    else if (type == "friend_group_renamed")
+        emit friendGroupRenamed(obj["old"].toString(), obj["new"].toString());
+    else if (type == "friend_group_deleted")
+        emit friendGroupDeleted(obj["group"].toString());
+    else if (type == "friend_groups")
+        emit friendGroupsReceived(obj["groups"].toArray());
+    else if (type == "pending_requests") {
+        QStringList reqs;
+        for (const auto &v : obj["requests"].toArray()) reqs << v.toString();
+        emit pendingRequestsReceived(reqs);
+    } else if (type == "friend_ignored")
+        emit friendIgnored(obj["from"].toString());
+    else if (type == "typing")
+        emit typingReceived(obj["from"].toString());
+    else if (type == "friend_error")
+        emit friendError(obj["content"].toString());
+    else if (type == "system")
         emit systemMessage(obj["content"].toString());
-    }
 }
 
 void ChatClient::onSocketConnected()
